@@ -21,12 +21,17 @@
     return res.status === 204 || res.headers.get("content-length") === "0" ? null : res.json();
   }
 
-  function saveAnswer(row) {
-    return request("/rest/v1/answers?on_conflict=session,player_id,question_id", {
-      method: "POST",
-      headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
-      body: JSON.stringify({ session: cfg.SESSION, ...row }),
-    });
+  // 409 betyder att frågan redan är besvarad (t.ex. vid omförsök) och räknas som sparat.
+  async function saveAnswer(row) {
+    try {
+      await request("/rest/v1/answers", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ session: cfg.SESSION, ...row }),
+      });
+    } catch (err) {
+      if (err.status !== 409) throw err;
+    }
   }
 
   function leaderboard(playerId) {
