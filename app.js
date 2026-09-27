@@ -7,7 +7,15 @@
   const LETTERS = "ABCDEFGH";
   const SECONDS = cfg.SECONDS_PER_QUESTION || 30;
 
-  let state = load() || { playerId: newId(), name: "", index: 0, startedAt: null, pending: [] };
+  // ?ny i adressen startar om quizet som en ny deltagare (för att testa).
+  if (new URLSearchParams(location.search).has("ny")) {
+    try {
+      localStorage.removeItem(STATE_KEY);
+    } catch {}
+    history.replaceState(null, "", location.pathname);
+  }
+  let state = load();
+  if (!state || !Array.isArray(state.pending)) state = { playerId: newId(), name: "", index: 0, startedAt: null, pending: [] };
   let timers = [];
 
   function newId() {
