@@ -1,56 +1,72 @@
+/* Fairlo-färger (från fairlo.se) */
 :root {
   color-scheme: light;
-  --bg: #f4f3ef;
-  --surface: #fcfcfb;
-  --surface-2: #efeee9;
-  --border: #dcdad3;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --muted: #7a7973;
-  --accent: #2a78d6;
+  --brand: #0a3c00;
+  --brand-2: #a6e49b;
+  --bg: #f7f9f7;
+  --surface: #ffffff;
+  --surface-2: #f0fded;
+  --border: #ced3cc;
+  --text: #111210;
+  --text-2: #424641;
+  --muted: #70776f;
+  --accent: #0e4800;
   --accent-ink: #ffffff;
-  --bar: #2a78d6;
-  --good: #0ca30c;
-  --good-bg: #e3f4e3;
-  --bad: #d03b3b;
-  --bad-bg: #fbe6e6;
-  --partial: #b27a00;
-  --partial-bg: #fdf1d6;
-  --radius: 14px;
+  --bar: #a0a79f;
+  --good: #208c01;
+  --good-bg: #ddfac7;
+  --bad: #cc3336;
+  --bad-bg: #feebe9;
+  --partial: #a16601;
+  --partial-bg: #ffedd9;
+  --timer: #33a800;
+  --radius: 20px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #111110;
-    --surface: #1a1a19;
-    --surface-2: #242422;
-    --border: #383835;
-    --text: #ffffff;
-    --text-2: #c3c2b7;
-    --muted: #93928a;
-    --accent: #3987e5;
-    --bar: #3987e5;
-    --good-bg: #16301a;
-    --bad-bg: #3a1c1c;
-    --partial: #eda100;
-    --partial-bg: #3a2e12;
+    --brand: #a6e49b;
+    --brand-2: #135400;
+    --bg: #111210;
+    --surface: #1e201d;
+    --surface-2: #072701;
+    --border: #424641;
+    --text: #f7f9f7;
+    --text-2: #ced3cc;
+    --muted: #a0a79f;
+    --accent: #a6e49b;
+    --accent-ink: #072701;
+    --bar: #70776f;
+    --good: #54c13b;
+    --good-bg: #0a3c00;
+    --bad: #fe726b;
+    --bad-bg: #3b100f;
+    --partial: #eeac5a;
+    --partial-bg: #2f1a00;
+    --timer: #54c13b;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #111110;
-  --surface: #1a1a19;
-  --surface-2: #242422;
-  --border: #383835;
-  --text: #ffffff;
-  --text-2: #c3c2b7;
-  --muted: #93928a;
-  --accent: #3987e5;
-  --bar: #3987e5;
-  --good-bg: #16301a;
-  --bad-bg: #3a1c1c;
-  --partial: #eda100;
-  --partial-bg: #3a2e12;
+  --brand: #a6e49b;
+  --brand-2: #135400;
+  --bg: #111210;
+  --surface: #1e201d;
+  --surface-2: #072701;
+  --border: #424641;
+  --text: #f7f9f7;
+  --text-2: #ced3cc;
+  --muted: #a0a79f;
+  --accent: #a6e49b;
+  --accent-ink: #072701;
+  --bar: #70776f;
+  --good: #54c13b;
+  --good-bg: #0a3c00;
+  --bad: #fe726b;
+  --bad-bg: #3b100f;
+  --partial: #eeac5a;
+  --partial-bg: #2f1a00;
+  --timer: #54c13b;
 }
 
 * { box-sizing: border-box; }
@@ -58,13 +74,14 @@ html, body { margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
 main.wide { max-width: 1100px; }
 
-h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+h1, h2, .score-big, .tile .value { font-family: Fraunces, Georgia, serif; }
+h1 { font-size: 2rem; line-height: 1.1; margin: 0 0 8px; letter-spacing: -0.02em; color: var(--brand); font-weight: 700; }
 h2 { font-size: 1.25rem; line-height: 1.3; margin: 0 0 16px; }
 p { margin: 0 0 16px; }
 .lead { color: var(--text-2); font-size: 1.05rem; }
@@ -78,7 +95,7 @@ p { margin: 0 0 16px; }
 }
 
 label { display: block; font-weight: 600; margin-bottom: 8px; }
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="number"], input[type="password"] {
   width: 100%;
   font: inherit;
   font-size: 1.1rem;
@@ -203,7 +220,7 @@ button {
 .progress { justify-content: space-between; }
 .timer-secs { font-weight: 700; font-variant-numeric: tabular-nums; }
 .timer { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; margin-bottom: 20px; }
-.timer-fill { display: block; height: 100%; width: 100%; background: var(--accent); border-radius: 5px; }
+.timer-fill { display: block; height: 100%; width: 100%; background: var(--timer); border-radius: 5px; }
 .hurry .timer-fill { background: var(--partial); }
 .hurry .timer-secs { color: var(--partial); }
 .critical .timer-fill { background: var(--bad); }
@@ -227,3 +244,19 @@ button {
 .matrix td.c-none { color: var(--muted); }
 .who { margin-top: 10px; font-size: 0.85rem; color: var(--text-2); }
 .who b { color: var(--text); font-weight: 600; }
+
+/* Fairlo-profil */
+body { background: var(--bg) radial-gradient(ellipse 60% 40% at 100% 0%, var(--brand-2), transparent 70%) no-repeat; background-attachment: fixed; }
+.brand { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.logo {
+  display: block; width: 104px; height: 34px;
+  background: var(--brand);
+  -webkit-mask: url(assets/fairlo-logo.svg) left center / contain no-repeat;
+  mask: url(assets/fairlo-logo.svg) left center / contain no-repeat;
+}
+.brand .tag { font-size: 0.8rem; color: var(--text-2); font-weight: 600; }
+.btn-primary, .option { border-radius: 999px; }
+.option { border-radius: 16px; }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.15); }
+.progress-bar span { background: var(--brand); }
+.bar-fill.correct { background: var(--good); }
