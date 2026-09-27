@@ -1,12 +1,14 @@
 # Kapitaltäckningsquiz
 
-Quiz till föredraget om vägen från konsumentkreditinstitut till bank.
+Quiz till föredraget om vägen från konsumentkreditinstitut till bank. Publiceras via Vercel.
 
-- `index.html` – quizet som deltagarna gör (länken som delas på Slack)
-- `admin.html` – presentatörsvy med live-topplista och svarsstatistik per fråga
-- `questions.js` – frågorna, rätta svar och förklaringar
-- `config.js` – Supabase-uppgifter och session
-- `supabase.sql` – skapar tabellen för svaren
+- `index.html`: quizet, med 30 sekunder per fråga och en topplista när man är klar
+- `admin.html`: admin-vy som kräver inloggning (Supabase Auth). Visar frågor med facit, allas svar och topplistan live.
+- `questions.js`: frågornas text och alternativ (utan facit)
+- `config.js`: Supabase-uppgifter, session och sekunder per fråga
+- `supabase.sql`: tabeller, rättning (trigger), topplista (RPC) och behörigheter
 
-Utan Supabase-uppgifter i `config.js` körs quizet i demoläge, där svaren bara sparas lokalt i webbläsaren.
-Byt `SESSION` i `config.js` före föredraget så att testsvar inte syns i topplistan.
+Facit och admin-e-post ligger i `private/answer-key.js`, som inte checkas in.
+Efter en ändring kör du `node tools/build-private-sql.js | clip` och kör resultatet i Supabase SQL Editor.
+
+Byt `SESSION` i `config.js` före föredraget, så att testsvar inte syns.

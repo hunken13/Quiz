@@ -1,84 +1,98 @@
-// Poängräkning och lagring (Supabase eller lokalt demoläge).
+// Kommunikation med Supabase. Rättningen sker i databasen, inte här.
 (function () {
   const cfg = window.QUIZ_CONFIG;
-  const remote = Boolean(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY);
-  const LOCAL_KEY = "quiz-demo-answers";
+  const AUTH_KEY = "quiz-admin-auth";
 
-  function score(q, answer) {
-    if (q.type === "mc") {
-      const ok = Number(answer) === q.correct;
-      return { correct: ok, points: ok ? 1 : 0 };
-    }
-    if (q.type === "tf") {
-      const ok = (answer === "true") === q.correct;
-      return { correct: ok, points: ok ? 1 : 0 };
-    }
-    const diff = Math.abs(Number(answer) - q.correct) / Math.abs(q.correct);
-    if (diff <= q.tolerance) return { correct: true, points: 1 };
-    if (diff <= q.tolerance * 2) return { correct: false, points: 0.5 };
-    return { correct: false, points: 0 };
-  }
-
-  function headers() {
+  function headers(token) {
     return {
       apikey: cfg.SUPABASE_ANON_KEY,
-      Authorization: "Bearer " + cfg.SUPABASE_ANON_KEY,
+      Authorization: "Bearer " + (token || cfg.SUPABASE_ANON_KEY),
       "Content-Type": "application/json",
     };
   }
 
-  function readLocal() {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_KEY)) || [];
-    } catch {
-      return [];
+  async function request(path, options = {}, token) {
+    const res = await fetch(cfg.SUPABASE_URL + path, { ...options, headers: { ...headers(token), ...options.headers } });
+    if (!res.ok) {
+      const err = new Error("Serverfel (" + res.status + ")");
+      err.status = res.status;
+      throw err;
     }
+    return res.status === 204 || res.headers.get("content-length") === "0" ? null : res.json();
   }
 
-  async function saveAnswer(row) {
-    const full = { session: cfg.SESSION, ...row };
-    if (!remote) {
-      const rows = readLocal().filter(
-        (r) => !(r.session === full.session && r.player_id === full.player_id && r.question_id === full.question_id)
-      );
-      rows.push({ ...full, created_at: new Date().toISOString() });
-      try {
-        localStorage.setItem(LOCAL_KEY, JSON.stringify(rows));
-      } catch {}
-      return;
-    }
-    const url = cfg.SUPABASE_URL + "/rest/v1/answers?on_conflict=session,player_id,question_id";
-    const res = await fetch(url, {
+  function saveAnswer(row) {
+    return request("/rest/v1/answers?on_conflict=session,player_id,question_id", {
       method: "POST",
-      headers: { ...headers(), Prefer: "resolution=ignore-duplicates,return=minimal" },
-      body: JSON.stringify(full),
+      headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ session: cfg.SESSION, ...row }),
     });
-    if (!res.ok) throw new Error("Kunde inte spara svaret (" + res.status + ")");
   }
 
-  async function fetchAnswers() {
-    if (!remote) return readLocal().filter((r) => r.session === cfg.SESSION);
-    const url =
-      cfg.SUPABASE_URL +
-      "/rest/v1/answers?select=player_id,player_name,question_id,answer,correct,points,created_at" +
-      "&session=eq." + encodeURIComponent(cfg.SESSION) + "&order=created_at.asc&limit=10000";
-    const res = await fetch(url, { headers: headers() });
-    if (!res.ok) throw new Error("Kunde inte hämta svar (" + res.status + ")");
-    return res.json();
+  function leaderboard(playerId) {
+    return request("/rest/v1/rpc/leaderboard", {
+      method: "POST",
+      body: JSON.stringify({ p_session: cfg.SESSION, p_player: playerId || null }),
+    });
   }
 
-  // Summerar per spelare, sorterat på poäng och sedan på vem som blev klar först.
-  function leaderboard(rows) {
-    const players = new Map();
-    for (const r of rows) {
-      const p = players.get(r.player_id) || { id: r.player_id, name: r.player_name, points: 0, answered: 0, last: "" };
-      p.points += Number(r.points);
-      p.answered += 1;
-      if (r.created_at > p.last) p.last = r.created_at;
-      players.set(r.player_id, p);
+  // --- Admin (inloggning via Supabase Auth) ---
+  function readAuth() {
+    try {
+      return JSON.parse(sessionStorage.getItem(AUTH_KEY));
+    } catch {
+      return null;
     }
-    return [...players.values()].sort((a, b) => b.points - a.points || a.last.localeCompare(b.last));
+  }
+  function writeAuth(data) {
+    try {
+      if (data) sessionStorage.setItem(AUTH_KEY, JSON.stringify(data));
+      else sessionStorage.removeItem(AUTH_KEY);
+    } catch {}
+  }
+  async function token(grant, body) {
+    const data = await request("/auth/v1/token?grant_type=" + grant, { method: "POST", body: JSON.stringify(body) });
+    const auth = { access: data.access_token, refresh: data.refresh_token, expires: Date.now() + data.expires_in * 1000 };
+    writeAuth(auth);
+    return auth;
+  }
+  function login(email, password) {
+    return token("password", { email, password });
+  }
+  function logout() {
+    writeAuth(null);
+  }
+  async function accessToken() {
+    let auth = readAuth();
+    if (!auth) return null;
+    if (Date.now() > auth.expires - 60000) {
+      try {
+        auth = await token("refresh_token", { refresh_token: auth.refresh });
+      } catch {
+        writeAuth(null);
+        return null;
+      }
+    }
+    return auth.access;
+  }
+  async function adminGet(path) {
+    const t = await accessToken();
+    if (!t) {
+      const err = new Error("Inte inloggad");
+      err.status = 401;
+      throw err;
+    }
+    return request(path, {}, t);
+  }
+  function fetchAllAnswers() {
+    return adminGet(
+      "/rest/v1/answers?select=player_id,player_name,question_id,answer,correct,points,created_at" +
+        "&session=eq." + encodeURIComponent(cfg.SESSION) + "&order=created_at.asc&limit=10000"
+    );
+  }
+  function fetchKeys() {
+    return adminGet("/rest/v1/question_keys?select=id,type,correct,tolerance,explanation");
   }
 
-  window.QuizStore = { remote, score, saveAnswer, fetchAnswers, leaderboard };
+  window.QuizStore = { saveAnswer, leaderboard, login, logout, accessToken, fetchAllAnswers, fetchKeys };
 })();

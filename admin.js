@@ -6,106 +6,213 @@
   const tooltip = document.getElementById("tooltip");
   const LETTERS = "ABCDEFGH";
   const REFRESH_MS = 3000;
+  let poll = null;
+  let keys = null;
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
       if (k === "class") node.className = v;
       else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
-      else if (v != null) node.setAttribute(k, v);
+      else if (v !== false && v != null) node.setAttribute(k, v === true ? "" : v);
     }
     for (const c of children.flat()) if (c != null) node.append(c);
     return node;
   }
   const fmt = (n, d = 1) => Number(n).toLocaleString("sv-SE", { maximumFractionDigits: d });
 
+  // ---------- Inloggning ----------
+  function renderLogin(message) {
+    clearInterval(poll);
+    const email = el("input", { type: "text", inputmode: "email", autocomplete: "username", placeholder: "E-post", "aria-label": "E-post" });
+    const password = el("input", { type: "password", autocomplete: "current-password", placeholder: "Lösenord", "aria-label": "Lösenord" });
+    const error = el("p", { class: "error" }, message || "");
+    root.replaceChildren(
+      el(
+        "form",
+        {
+          class: "card login",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            error.textContent = "";
+            try {
+              await store.login(email.value.trim(), password.value);
+              start();
+            } catch {
+              error.textContent = "Fel e-post eller lösenord.";
+            }
+          },
+        },
+        el("h1", {}, "Admin"),
+        el("p", { class: "muted" }, title),
+        email,
+        password,
+        el("button", { class: "btn-primary", type: "submit" }, "Logga in"),
+        error
+      )
+    );
+    email.focus();
+  }
+
+  // ---------- Hjälpare ----------
+  function leaderboard(rows) {
+    const players = new Map();
+    for (const r of rows) {
+      const p = players.get(r.player_id) || { id: r.player_id, name: r.player_name, points: 0, answered: 0, last: "" };
+      p.points += Number(r.points);
+      p.answered += 1;
+      if (r.created_at > p.last) p.last = r.created_at;
+      players.set(r.player_id, p);
+    }
+    return [...players.values()].sort((a, b) => b.points - a.points || a.last.localeCompare(b.last));
+  }
+
   function tile(value, label) {
     return el("div", { class: "tile" }, el("div", { class: "value" }, value), el("div", { class: "label" }, label));
   }
 
-  function barRow(label, count, total, isCorrect) {
-    const pct = total ? (count / total) * 100 : 0;
-    const tip = label + ": " + count + " svar (" + fmt(pct, 0) + " %)" + (isCorrect ? ", rätt svar" : "");
-    const row = el(
-      "div",
-      { class: "bar-row" },
-      el("span", { class: "opt" + (isCorrect ? " correct" : "") }, isCorrect ? el("span", { class: "badge-correct" }, "✓ ") : null, label),
-      el("div", { class: "bar-track" }, el("div", { class: "bar-fill" + (isCorrect ? " correct" : ""), style: "width:" + pct + "%" })),
-      el("span", { class: "num" }, fmt(pct, 0) + " %")
-    );
-    row.addEventListener("mousemove", (e) => {
-      tooltip.textContent = tip;
-      tooltip.style.left = e.clientX + 14 + "px";
+  function withTooltip(node, text) {
+    node.addEventListener("mousemove", (e) => {
+      tooltip.textContent = text;
+      tooltip.style.left = Math.min(e.clientX + 14, innerWidth - tooltip.offsetWidth - 8) + "px";
       tooltip.style.top = e.clientY + 14 + "px";
       tooltip.style.opacity = 1;
     });
-    row.addEventListener("mouseleave", () => (tooltip.style.opacity = 0));
-    return row;
+    node.addEventListener("mouseleave", () => (tooltip.style.opacity = 0));
+    return node;
   }
 
-  function questionStat(q, i, rows) {
+  function barRow(label, count, total, isCorrect) {
+    const pct = total ? (count / total) * 100 : 0;
+    return withTooltip(
+      el(
+        "div",
+        { class: "bar-row" },
+        el("span", { class: "opt" + (isCorrect ? " correct" : "") }, isCorrect ? el("span", { class: "badge-correct" }, "✓ ") : null, label),
+        el("div", { class: "bar-track" }, el("div", { class: "bar-fill" + (isCorrect ? " correct" : ""), style: "width:" + pct + "%" })),
+        el("span", { class: "num" }, count + " st")
+      ),
+      label + ": " + count + " svar (" + fmt(pct, 0) + " %)" + (isCorrect ? ", rätt svar" : "")
+    );
+  }
+
+  function answerLabel(q, answer) {
+    if (answer === "") return "–";
+    if (q.type === "mc") return LETTERS[Number(answer)] || answer;
+    if (q.type === "tf") return answer === "true" ? "Sant" : "Falskt";
+    return fmt(answer) + " " + q.unit;
+  }
+
+  function questionCard(q, i, rows) {
+    const key = keys[q.id];
     const answers = rows.filter((r) => r.question_id === q.id);
     const n = answers.length;
-    const correctShare = n ? (answers.filter((r) => r.correct).length / n) * 100 : 0;
+    const nCorrect = answers.filter((r) => r.correct).length;
     const card = el(
       "article",
       { class: "card qstat" },
       el("h3", {}, i + 1 + ". " + q.text),
-      el("div", { class: "meta" }, n + " svar" + (n ? " · " + fmt(correctShare, 0) + " % rätt" : ""))
+      el("div", { class: "meta" }, n + " svar" + (n ? " · " + fmt((nCorrect / n) * 100, 0) + " % rätt" : ""))
     );
+
+    const namesFor = (pred) =>
+      answers
+        .filter(pred)
+        .map((r) => r.player_name)
+        .join(", ");
+
     if (q.type === "estimate") {
-      const vals = answers.map((r) => Number(r.answer)).filter(Number.isFinite).sort((a, b) => a - b);
-      const median = vals.length ? (vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2) : null;
+      const vals = answers.map((r) => r.answer).filter((a) => a !== "").map(Number).sort((a, b) => a - b);
+      const mid = vals.length >> 1;
+      const median = vals.length ? (vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2) : null;
       card.append(
         el(
           "div",
           { class: "est-stats" },
-          el("span", {}, "Rätt svar: ", el("b", {}, fmt(q.correct) + " " + q.unit)),
+          el("span", {}, "Rätt svar: ", el("b", { class: "badge-correct" }, key ? fmt(key.correct) + " " + q.unit : "?")),
           el("span", {}, "Median: ", el("b", {}, median == null ? "–" : fmt(median) + " " + q.unit)),
           el("span", {}, "Lägst–högst: ", el("b", {}, vals.length ? fmt(vals[0]) + " – " + fmt(vals[vals.length - 1]) : "–"))
-        )
+        ),
+        n
+          ? el(
+              "div",
+              { class: "who" },
+              answers
+                .slice()
+                .sort((a, b) => b.points - a.points)
+                .map((r, j) => [j ? ", " : "", el("b", {}, r.player_name), " " + answerLabel(q, r.answer)])
+            )
+          : null
       );
-      return card;
+    } else {
+      const opts = q.type === "tf" ? [["true", "Sant"], ["false", "Falskt"]] : q.options.map((o, j) => [String(j), LETTERS[j] + ". " + o]);
+      const bars = el("div", { class: "bars" });
+      for (const [value, label] of opts) {
+        bars.append(barRow(label, answers.filter((r) => r.answer === value).length, n, key && value === key.correct));
+      }
+      card.append(bars);
+      const right = namesFor((r) => r.correct);
+      const timedOut = namesFor((r) => r.answer === "");
+      if (right) card.append(el("div", { class: "who" }, el("b", {}, "Rätt: "), right));
+      if (timedOut) card.append(el("div", { class: "who" }, el("b", {}, "Hann inte svara: "), timedOut));
     }
-    const opts = q.type === "tf" ? [["true", "Sant"], ["false", "Falskt"]] : q.options.map((o, j) => [String(j), LETTERS[j] + ". " + o]);
-    const bars = el("div", { class: "bars" });
-    for (const [value, label] of opts) {
-      const count = answers.filter((r) => r.answer === value).length;
-      bars.append(barRow(label, count, n, value === String(q.correct)));
-    }
-    card.append(bars);
+    if (key && key.explanation) card.append(el("div", { class: "explanation" }, key.explanation));
     return card;
   }
 
-  let lastError = "";
-
-  async function refresh() {
-    let rows;
-    try {
-      rows = await store.fetchAnswers();
-      lastError = "";
-    } catch (err) {
-      lastError = err.message;
-      rows = null;
-    }
-    if (rows) draw(rows);
-    else if (!root.hasChildNodes()) root.append(el("p", { class: "error" }, lastError));
+  function matrix(board, rows) {
+    const byPlayer = new Map();
+    for (const r of rows) byPlayer.set(r.player_id + "|" + r.question_id, r);
+    const head = el("tr", {}, el("th", {}, "Namn"), questions.map((q, i) => el("th", {}, "F" + (i + 1))), el("th", {}, "Poäng"));
+    const body = board.map((p) =>
+      el(
+        "tr",
+        {},
+        el("td", {}, p.name),
+        questions.map((q) => {
+          const r = byPlayer.get(p.id + "|" + q.id);
+          if (!r) return el("td", { class: "c-none" }, "·");
+          const cls = r.points === 1 || Number(r.points) === 1 ? "c-good" : Number(r.points) > 0 ? "c-partial" : r.answer === "" ? "c-none" : "c-bad";
+          const sym = cls === "c-good" ? "✓" : cls === "c-partial" ? "½" : cls === "c-none" ? "–" : "✗";
+          return withTooltip(el("td", { class: cls }, sym), p.name + " · F" + (questions.indexOf(q) + 1) + ": " + answerLabel(q, r.answer));
+        }),
+        el("td", {}, el("b", {}, fmt(p.points)))
+      )
+    );
+    return el(
+      "section",
+      { class: "card matrix-wrap" },
+      el("h2", {}, "Alla svar"),
+      el("p", { class: "muted" }, "✓ rätt · ½ nära (skattning) · ✗ fel · – hann inte svara · · inte kommit dit än. Håll muspekaren över en ruta för att se svaret."),
+      el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, body))
+    );
   }
 
+  // ---------- Vy ----------
   function draw(rows) {
-    const board = store.leaderboard(rows);
+    const board = leaderboard(rows);
     const finished = board.filter((p) => p.answered === questions.length).length;
     const avg = board.length ? board.reduce((s, p) => s + p.points, 0) / board.length : 0;
 
     const header = el(
       "div",
       { class: "stats-header" },
-      el("div", {}, el("h1", {}, title), el("p", { class: "muted" }, "Liveresultat · session ”" + cfg.SESSION + "”" + (store.remote ? "" : " · demoläge"))),
+      el(
+        "div",
+        {},
+        el("h1", {}, title),
+        el(
+          "p",
+          { class: "muted" },
+          "Admin · session ”" + cfg.SESSION + "” · uppdateras var " + REFRESH_MS / 1000 + ":e sekund · ",
+          el("button", { class: "link-btn", type: "button", onclick: () => (store.logout(), renderLogin()) }, "Logga ut")
+        )
+      ),
       el("div", { class: "tiles" }, tile(board.length, "deltagare"), tile(finished, "klara"), tile(fmt(avg), "snittpoäng av " + questions.length))
     );
 
     const list = el("ol", { class: "board" });
-    board.slice(0, 15).forEach((p, i) => {
+    board.forEach((p, i) =>
       list.append(
         el(
           "li",
@@ -114,16 +221,40 @@
           el("span", { class: "name", title: p.name }, p.name, " ", el("span", { class: "sub" }, p.answered + "/" + questions.length)),
           el("span", { class: "pts" }, fmt(p.points))
         )
-      );
-    });
+      )
+    );
     if (!board.length) list.append(el("li", {}, el("span"), el("span", { class: "muted" }, "Inga svar än…"), el("span")));
 
     const aside = el("aside", { class: "card" }, el("h2", {}, "Topplista"), list);
-    const stats = el("div", { class: "qstats" }, questions.map((q, i) => questionStat(q, i, rows)));
-
-    root.replaceChildren(header, el("div", { class: "layout" }, aside, stats), lastError ? el("p", { class: "error" }, lastError) : null);
+    const stats = el("div", { class: "qstats" }, questions.map((q, i) => questionCard(q, i, rows)));
+    root.replaceChildren(header, el("div", { class: "layout" }, aside, stats), matrix(board, rows));
   }
 
-  refresh();
-  setInterval(refresh, REFRESH_MS);
+  async function refresh() {
+    try {
+      if (!keys) {
+        const list = await store.fetchKeys();
+        if (!list.length) {
+          renderLogin("Kontot har inte admin-behörighet, eller så är facit inte inlagt i databasen.");
+          store.logout();
+          return;
+        }
+        keys = Object.fromEntries(list.map((k) => [k.id, k]));
+      }
+      draw(await store.fetchAllAnswers());
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) renderLogin("Du behöver logga in igen.");
+    }
+  }
+
+  async function start() {
+    if (!(await store.accessToken())) return renderLogin();
+    keys = null;
+    root.replaceChildren(el("p", { class: "muted" }, "Laddar…"));
+    await refresh();
+    clearInterval(poll);
+    poll = setInterval(refresh, REFRESH_MS);
+  }
+
+  start();
 })();

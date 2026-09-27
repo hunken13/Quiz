@@ -5,8 +5,10 @@
   const app = document.getElementById("app");
   const STATE_KEY = "quiz-state-" + cfg.SESSION;
   const LETTERS = "ABCDEFGH";
+  const SECONDS = cfg.SECONDS_PER_QUESTION || 30;
 
-  let state = load() || { playerId: newId(), name: "", index: 0, points: 0, results: {} };
+  let state = load() || { playerId: newId(), name: "", index: 0, startedAt: null, pending: [] };
+  let timers = [];
 
   function newId() {
     return (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(16).slice(2);
@@ -33,17 +35,35 @@
     for (const c of children.flat()) if (c != null) node.append(c);
     return node;
   }
-  function fmtPoints(p) {
-    return String(p).replace(".", ",");
+  const fmt = (n) => Number(n).toLocaleString("sv-SE", { maximumFractionDigits: 1 });
+  function clearTimers() {
+    timers.forEach((t) => clearTimeout(t) || clearInterval(t));
+    timers = [];
+  }
+
+  // Skickar sparade svar; misslyckade ligger kvar och försöks igen senare.
+  let flushing = false;
+  async function flush() {
+    if (flushing) return;
+    flushing = true;
+    try {
+      while (state.pending.length) {
+        await store.saveAnswer(state.pending[0]);
+        state.pending.shift();
+        save();
+      }
+    } catch {
+      // nytt försök vid nästa svar eller från topplistan
+    } finally {
+      flushing = false;
+    }
   }
 
   function render() {
+    clearTimers();
     app.replaceChildren();
-    if (!store.remote) {
-      app.append(el("div", { class: "demo-banner" }, "Demoläge: svaren sparas bara i den här webbläsaren."));
-    }
     if (!state.name) return renderStart();
-    if (state.index >= questions.length) return renderEnd();
+    if (state.index >= questions.length) return renderLeaderboard();
     renderQuestion();
   }
 
@@ -51,79 +71,73 @@
     const input = el("input", { type: "text", id: "name", maxlength: "40", autocomplete: "name", placeholder: "Förnamn och efternamnets initial" });
     const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Starta quizet");
     input.addEventListener("input", () => (btn.disabled = !input.value.trim()));
-    const form = el(
-      "form",
-      {
-        class: "card",
-        onsubmit: (e) => {
-          e.preventDefault();
-          state.name = input.value.trim().slice(0, 40);
-          save();
-          render();
+    app.append(
+      el(
+        "form",
+        {
+          class: "card",
+          onsubmit: (e) => {
+            e.preventDefault();
+            state.name = input.value.trim().slice(0, 40);
+            save();
+            render();
+          },
         },
-      },
-      el("h1", {}, title),
-      el("p", { class: "lead" }, subtitle),
-      el("p", { class: "muted" }, questions.length + " frågor. Du får se rätt svar och en förklaring efter varje fråga."),
-      el("label", { for: "name" }, "Ditt namn (visas i topplistan)"),
-      input,
-      btn
+        el("h1", {}, title),
+        el("p", { class: "lead" }, subtitle),
+        el("p", { class: "muted" }, questions.length + " frågor, " + SECONDS + " sekunder per fråga. Resultatet visas i topplistan när du är klar."),
+        el("label", { for: "name" }, "Ditt namn (visas i topplistan)"),
+        input,
+        btn
+      )
     );
-    app.append(form);
     input.focus();
   }
 
   function renderQuestion() {
     const q = questions[state.index];
-    const answered = state.results[q.id];
-    const card = el("section", { class: "card" });
-    const pct = (state.index / questions.length) * 100;
-    card.append(
-      el(
-        "div",
-        { class: "progress" },
-        el("span", { class: "muted" }, "Fråga " + (state.index + 1) + " av " + questions.length),
-        el("div", { class: "progress-bar", "aria-hidden": "true" }, el("span", { style: "width:" + pct + "%" }))
-      ),
+    if (!state.startedAt) {
+      state.startedAt = Date.now();
+      save();
+    }
+    const remainingMs = () => SECONDS * 1000 - (Date.now() - state.startedAt);
+
+    let done = false;
+    const submit = (answer) => {
+      if (done) return;
+      done = true;
+      clearTimers();
+      state.pending.push({ player_id: state.playerId, player_name: state.name, question_id: q.id, answer: String(answer) });
+      state.index += 1;
+      state.startedAt = null;
+      save();
+      flush();
+      render();
+      window.scrollTo(0, 0);
+    };
+
+    // Om sidan laddas om efter att tiden gått ut räknas frågan som obesvarad.
+    if (remainingMs() <= 0) return submit("");
+
+    const fill = el("span", { class: "timer-fill" });
+    const secs = el("span", { class: "timer-secs", "aria-live": "off" });
+    const card = el(
+      "section",
+      { class: "card" },
+      el("div", { class: "progress" }, el("span", { class: "muted" }, "Fråga " + (state.index + 1) + " av " + questions.length), secs),
+      el("div", { class: "timer", role: "timer", "aria-label": "Tid kvar" }, fill),
       el("h2", {}, q.text)
     );
 
-    const submit = (answer) => {
-      if (state.results[q.id]) return;
-      const res = store.score(q, answer);
-      state.results[q.id] = { answer, ...res };
-      state.points += res.points;
-      save();
-      render();
-      store
-        .saveAnswer({
-          player_id: state.playerId,
-          player_name: state.name,
-          question_id: q.id,
-          answer: String(answer),
-          correct: res.correct,
-          points: res.points,
-        })
-        .catch((err) => {
-          const box = document.querySelector(".feedback");
-          if (box) box.after(el("p", { class: "error" }, err.message + ". Kontrollera uppkopplingen."));
-        });
-    };
-
+    let getEstimate = null;
     if (q.type === "mc" || q.type === "tf") {
       const opts = q.type === "tf" ? [["true", "Sant"], ["false", "Falskt"]] : q.options.map((o, i) => [String(i), o]);
-      const correctValue = String(q.correct);
       const list = el("div", { class: "options" + (q.type === "tf" ? " tf" : "") });
       opts.forEach(([value, label], i) => {
-        let cls = "option";
-        if (answered) {
-          if (value === correctValue) cls += " is-correct";
-          else if (value === answered.answer) cls += " is-wrong";
-        }
         list.append(
           el(
             "button",
-            { class: cls, type: "button", disabled: Boolean(answered), onclick: () => submit(value) },
+            { class: "option", type: "button", onclick: () => submit(value) },
             q.type === "mc" ? el("span", { class: "key", "aria-hidden": "true" }, LETTERS[i]) : null,
             el("span", {}, label)
           )
@@ -132,73 +146,90 @@
       card.append(list);
     } else {
       const input = el("input", { type: "number", inputmode: "decimal", id: "est", step: "any", "aria-label": "Ditt svar i " + q.unit });
-      if (answered) {
-        input.value = answered.answer;
-        input.disabled = true;
-      }
       const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Svara");
       input.addEventListener("input", () => (btn.disabled = input.value === ""));
+      getEstimate = () => (input.value === "" ? "" : String(Number(input.value)));
       card.append(
         el(
           "form",
           {
             onsubmit: (e) => {
               e.preventDefault();
-              if (input.value !== "") submit(String(Number(input.value)));
+              if (input.value !== "") submit(getEstimate());
             },
           },
           el("div", { class: "estimate-row" }, input, el("span", { class: "unit" }, q.unit)),
-          answered ? null : btn
+          btn
         )
       );
-      if (!answered) setTimeout(() => input.focus(), 0);
-    }
-
-    if (answered) {
-      let kind = answered.points === 1 ? "good" : answered.points > 0 ? "partial" : "bad";
-      let heading = kind === "good" ? "✓ Rätt!" : kind === "partial" ? "◐ Nära! Halv poäng" : "✗ Fel";
-      if (q.type === "estimate") heading += " Rätt svar: " + q.correct.toLocaleString("sv-SE") + " " + q.unit + ".";
-      card.append(
-        el("div", { class: "feedback " + kind, role: "status" }, el("strong", {}, heading), el("p", {}, q.explanation)),
-        el(
-          "button",
-          {
-            class: "btn-primary",
-            type: "button",
-            onclick: () => {
-              state.index += 1;
-              save();
-              render();
-              window.scrollTo(0, 0);
-            },
-          },
-          state.index + 1 < questions.length ? "Nästa fråga" : "Se resultat"
-        )
-      );
+      timers.push(setTimeout(() => input.focus(), 0));
     }
     app.append(card);
+
+    // Stapeln krymper linjärt; sekundräknaren och färgen uppdateras separat.
+    fill.style.width = (remainingMs() / (SECONDS * 1000)) * 100 + "%";
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        fill.style.transition = "width " + remainingMs() / 1000 + "s linear";
+        fill.style.width = "0%";
+      })
+    );
+    const tick = () => {
+      const left = Math.max(0, Math.ceil(remainingMs() / 1000));
+      secs.textContent = left + " s";
+      card.classList.toggle("hurry", left <= 10);
+      card.classList.toggle("critical", left <= 5);
+    };
+    tick();
+    timers.push(setInterval(tick, 250));
+    // När tiden är ute skickas ett påbörjat skattningssvar, annars ett tomt svar.
+    timers.push(setTimeout(() => submit(getEstimate ? getEstimate() : ""), remainingMs()));
   }
 
-  async function renderEnd() {
-    const rankLine = el("p", { class: "muted" }, "Hämtar din placering…");
+  function renderLeaderboard() {
+    const scoreLine = el("div", { class: "score-big" }, "–");
+    const list = el("ol", { class: "board" });
+    const status = el("p", { class: "muted" }, "Hämtar topplistan…");
     app.append(
       el(
         "section",
         { class: "card" },
         el("h1", {}, "Bra jobbat, " + state.name + "!"),
-        el("p", { class: "lead" }, "Du fick"),
-        el("div", { class: "score-big" }, fmtPoints(state.points) + " / " + questions.length),
-        el("p", { class: "muted" }, "poäng"),
-        rankLine
-      )
+        el("p", { class: "lead" }, "Dina poäng"),
+        scoreLine,
+        el("p", { class: "muted" }, "av " + questions.length + " möjliga")
+      ),
+      el("section", { class: "card", style: "margin-top:16px" }, el("h2", {}, "Topplista"), list, status)
     );
-    try {
-      const board = store.leaderboard(await store.fetchAnswers());
-      const pos = board.findIndex((p) => p.id === state.playerId);
-      rankLine.textContent = pos >= 0 ? "Just nu ligger du på plats " + (pos + 1) + " av " + board.length + "." : "";
-    } catch {
-      rankLine.textContent = "";
-    }
+
+    const update = async () => {
+      await flush();
+      if (state.pending.length) {
+        status.textContent = "Skickar dina sista svar…";
+        return;
+      }
+      try {
+        const rows = await store.leaderboard(state.playerId);
+        const me = rows.findIndex((r) => r.is_me);
+        if (me >= 0) scoreLine.textContent = fmt(rows[me].points);
+        list.replaceChildren(
+          ...rows.map((r, i) =>
+            el(
+              "li",
+              { class: r.is_me ? "me" : "" },
+              el("span", { class: "rank" }, i + 1 + "."),
+              el("span", { class: "name" }, r.player_name, r.answered < questions.length ? el("span", { class: "sub" }, " spelar…") : null),
+              el("span", { class: "pts" }, fmt(r.points))
+            )
+          )
+        );
+        status.textContent = me >= 0 ? "Du ligger på plats " + (me + 1) + " av " + rows.length + ". Listan uppdateras automatiskt." : "";
+      } catch {
+        status.textContent = "Kunde inte hämta topplistan, försöker igen…";
+      }
+    };
+    update();
+    timers.push(setInterval(update, 5000));
   }
 
   render();
