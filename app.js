@@ -2,6 +2,7 @@
   const { title, subtitle, questions } = window.QUIZ;
   const cfg = window.QUIZ_CONFIG;
   const store = window.QuizStore;
+  const T = window.QUIZ_TEXT;
   const app = document.getElementById("app");
   const STATE_KEY = "quiz-state-" + cfg.SESSION;
   const LETTERS = "ABCDEFGH";
@@ -43,7 +44,7 @@
     for (const c of children.flat()) if (c != null) node.append(c);
     return node;
   }
-  const fmt = (n) => Number(n).toLocaleString("sv-SE", { maximumFractionDigits: 1 });
+  const fmt = (n) => Number(n).toLocaleString(T.locale, { maximumFractionDigits: 1 });
   function clearTimers() {
     timers.forEach((t) => clearTimeout(t) || clearInterval(t));
     timers = [];
@@ -77,8 +78,8 @@
   }
 
   function renderStart() {
-    const input = el("input", { type: "text", id: "name", maxlength: "40", autocomplete: "name", placeholder: "Förnamn och efternamnets initial" });
-    const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Gå med");
+    const input = el("input", { type: "text", id: "name", maxlength: "40", autocomplete: "name", placeholder: T.namePlaceholder });
+    const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, T.join);
     input.addEventListener("input", () => (btn.disabled = !input.value.trim()));
     app.append(
       el(
@@ -94,8 +95,8 @@
         },
         el("h1", {}, title),
         el("p", { class: "lead" }, subtitle),
-        el("p", { class: "muted" }, questions.length + " frågor, " + SECONDS + " sekunder per fråga. Quizet startar när alla är med, och resultatet visas i topplistan när du är klar."),
-        el("label", { for: "name" }, "Ditt namn (visas i topplistan)"),
+        el("p", { class: "muted" }, T.intro(questions.length, SECONDS)),
+        el("label", { for: "name" }, T.nameLabel),
         input,
         btn
       )
@@ -112,11 +113,11 @@
       el(
         "section",
         { class: "card" },
-        el("h1", {}, "Du är med, " + state.name + "!"),
-        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), "Väntar på att quizet ska starta…"),
-        el("p", { class: "muted" }, "Håll sidan öppen. Första frågan visas automatiskt när quizet startar.")
+        el("h1", {}, T.youreIn(state.name)),
+        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), T.waitingForQuiz),
+        el("p", { class: "muted" }, T.keepOpen)
       ),
-      el("section", { class: "card", style: "margin-top:16px" }, el("div", { class: "lobby-head" }, el("h2", {}, "Med i quizet"), count), chips, status)
+      el("section", { class: "card", style: "margin-top:16px" }, el("div", { class: "lobby-head" }, el("h2", {}, T.inTheQuiz), count), chips, status)
     );
 
     const update = async () => {
@@ -134,11 +135,11 @@
           return render();
         }
         const n = lobby.players.length;
-        count.textContent = n + (n === 1 ? " ansluten" : " anslutna");
+        count.textContent = T.joinedCount(n);
         chips.replaceChildren(...lobby.players.map((p) => el("li", { class: p.me ? "me" : "" }, p.name)));
         status.textContent = "";
       } catch {
-        status.textContent = "Tappade kontakten, försöker igen…";
+        status.textContent = T.lostConnection;
       }
     };
     update();
@@ -175,14 +176,14 @@
     const card = el(
       "section",
       { class: "card" },
-      el("div", { class: "progress" }, el("span", { class: "muted" }, "Fråga " + (state.index + 1) + " av " + questions.length), secs),
-      el("div", { class: "timer", role: "timer", "aria-label": "Tid kvar" }, fill),
+      el("div", { class: "progress" }, el("span", { class: "muted" }, T.questionOf(state.index + 1, questions.length)), secs),
+      el("div", { class: "timer", role: "timer", "aria-label": T.timeLeft }, fill),
       el("h2", {}, q.text)
     );
 
     let getEstimate = null;
     if (q.type === "mc" || q.type === "tf") {
-      const opts = q.type === "tf" ? [["true", "Sant"], ["false", "Falskt"]] : q.options.map((o, i) => [String(i), o]);
+      const opts = q.type === "tf" ? [["true", T.true], ["false", T.false]] : q.options.map((o, i) => [String(i), o]);
       const list = el("div", { class: "options" + (q.type === "tf" ? " tf" : "") });
       opts.forEach(([value, label], i) => {
         list.append(
@@ -196,8 +197,8 @@
       });
       card.append(list);
     } else {
-      const input = el("input", { type: "number", inputmode: "decimal", id: "est", step: "any", "aria-label": "Ditt svar i " + q.unit });
-      const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Svara");
+      const input = el("input", { type: "number", inputmode: "decimal", id: "est", step: "any", "aria-label": T.answerIn(q.unit) });
+      const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, T.answer);
       input.addEventListener("input", () => (btn.disabled = input.value === ""));
       getEstimate = () => (input.value === "" ? "" : String(Number(input.value)));
       card.append(
@@ -240,23 +241,23 @@
   function renderLeaderboard() {
     const scoreLine = el("div", { class: "score-big" }, "–");
     const list = el("ol", { class: "board" });
-    const status = el("p", { class: "muted" }, "Hämtar topplistan…");
+    const status = el("p", { class: "muted" }, T.loadingBoard);
     app.append(
       el(
         "section",
         { class: "card" },
-        el("h1", {}, "Bra jobbat, " + state.name + "!"),
-        el("p", { class: "lead" }, "Dina poäng"),
+        el("h1", {}, T.wellDone(state.name)),
+        el("p", { class: "lead" }, T.yourPoints),
         scoreLine,
-        el("p", { class: "muted" }, "av " + questions.length + " möjliga")
+        el("p", { class: "muted" }, T.ofPossible(questions.length))
       ),
-      el("section", { class: "card", style: "margin-top:16px" }, el("h2", {}, "Topplista"), list, status)
+      el("section", { class: "card", style: "margin-top:16px" }, el("h2", {}, T.leaderboard), list, status)
     );
 
     const update = async () => {
       await flush();
       if (state.pending.length) {
-        status.textContent = "Skickar dina sista svar…";
+        status.textContent = T.sendingLast;
         return;
       }
       try {
@@ -275,14 +276,14 @@
               "li",
               { class: r.is_me ? "me" : "" },
               el("span", { class: "rank" }, i + 1 + "."),
-              el("span", { class: "name" }, r.player_name, r.answered < questions.length ? el("span", { class: "sub" }, " spelar…") : null),
+              el("span", { class: "name" }, r.player_name, r.answered < questions.length ? el("span", { class: "sub" }, T.playing) : null),
               el("span", { class: "pts" }, fmt(r.points))
             )
           )
         );
-        status.textContent = me >= 0 ? "Du ligger på plats " + (me + 1) + " av " + rows.length + ". Listan uppdateras automatiskt." : "";
+        status.textContent = me >= 0 ? T.yourPlace(me + 1, rows.length) : "";
       } catch {
-        status.textContent = "Kunde inte hämta topplistan, försöker igen…";
+        status.textContent = T.boardError;
       }
     };
     update();

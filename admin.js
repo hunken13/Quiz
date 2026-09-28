@@ -2,6 +2,7 @@
   const { title, questions } = window.QUIZ;
   const cfg = window.QUIZ_CONFIG;
   const store = window.QuizStore;
+  const T = window.QUIZ_TEXT;
   const root = document.getElementById("admin");
   const tooltip = document.getElementById("tooltip");
   const LETTERS = "ABCDEFGH";
@@ -21,13 +22,13 @@
     for (const c of children.flat()) if (c != null) node.append(c);
     return node;
   }
-  const fmt = (n, d = 1) => Number(n).toLocaleString("sv-SE", { maximumFractionDigits: d });
+  const fmt = (n, d = 1) => Number(n).toLocaleString(T.locale, { maximumFractionDigits: d });
 
   // ---------- Inloggning ----------
   function renderLogin(message) {
     clearInterval(poll);
-    const email = el("input", { type: "text", inputmode: "email", autocomplete: "username", placeholder: "E-post", "aria-label": "E-post" });
-    const password = el("input", { type: "password", autocomplete: "current-password", placeholder: "Lösenord", "aria-label": "Lösenord" });
+    const email = el("input", { type: "text", inputmode: "email", autocomplete: "username", placeholder: T.email, "aria-label": T.email });
+    const password = el("input", { type: "password", autocomplete: "current-password", placeholder: T.password, "aria-label": T.password });
     const error = el("p", { class: "error" }, message || "");
     root.replaceChildren(
       el(
@@ -41,7 +42,7 @@
               await store.login(email.value.trim(), password.value);
               start();
             } catch {
-              error.textContent = "Fel e-post eller lösenord.";
+              error.textContent = T.wrongLogin;
             }
           },
         },
@@ -49,7 +50,7 @@
         el("p", { class: "muted" }, title),
         email,
         password,
-        el("button", { class: "btn-primary", type: "submit" }, "Logga in"),
+        el("button", { class: "btn-primary", type: "submit" }, T.logIn),
         error
       )
     );
@@ -92,16 +93,16 @@
         { class: "bar-row" },
         el("span", { class: "opt" + (isCorrect ? " correct" : "") }, isCorrect ? el("span", { class: "badge-correct" }, "✓ ") : null, label),
         el("div", { class: "bar-track" }, el("div", { class: "bar-fill" + (isCorrect ? " correct" : ""), style: "width:" + pct + "%" })),
-        el("span", { class: "num" }, count + " st")
+        el("span", { class: "num" }, T.countUnit(count))
       ),
-      label + ": " + count + " svar (" + fmt(pct, 0) + " %)" + (isCorrect ? ", rätt svar" : "")
+      T.barTooltip(label, count, fmt(pct, 0), isCorrect)
     );
   }
 
   function answerLabel(q, answer) {
     if (answer === "") return "–";
     if (q.type === "mc") return LETTERS[Number(answer)] || answer;
-    if (q.type === "tf") return answer === "true" ? "Sant" : "Falskt";
+    if (q.type === "tf") return answer === "true" ? T.true : T.false;
     return fmt(answer) + " " + q.unit;
   }
 
@@ -114,7 +115,7 @@
       "article",
       { class: "card qstat" },
       el("h3", {}, i + 1 + ". " + q.text),
-      el("div", { class: "meta" }, n + " svar" + (n ? " · " + fmt((nCorrect / n) * 100, 0) + " % rätt" : ""))
+      el("div", { class: "meta" }, T.answersMeta(n, n ? fmt((nCorrect / n) * 100, 0) : null))
     );
 
     const namesFor = (pred) =>
@@ -131,9 +132,9 @@
         el(
           "div",
           { class: "est-stats" },
-          el("span", {}, "Rätt svar: ", el("b", { class: "badge-correct" }, key ? fmt(key.correct) + " " + q.unit : "?")),
-          el("span", {}, "Median: ", el("b", {}, median == null ? "–" : fmt(median) + " " + q.unit)),
-          el("span", {}, "Lägst–högst: ", el("b", {}, vals.length ? fmt(vals[0]) + " – " + fmt(vals[vals.length - 1]) : "–"))
+          el("span", {}, T.correctAnswer, el("b", { class: "badge-correct" }, key ? fmt(key.correct) + " " + q.unit : "?")),
+          el("span", {}, T.median, el("b", {}, median == null ? "–" : fmt(median) + " " + q.unit)),
+          el("span", {}, T.range, el("b", {}, vals.length ? fmt(vals[0]) + " – " + fmt(vals[vals.length - 1]) : "–"))
         ),
         n
           ? el(
@@ -147,7 +148,7 @@
           : null
       );
     } else {
-      const opts = q.type === "tf" ? [["true", "Sant"], ["false", "Falskt"]] : q.options.map((o, j) => [String(j), LETTERS[j] + ". " + o]);
+      const opts = q.type === "tf" ? [["true", T.true], ["false", T.false]] : q.options.map((o, j) => [String(j), LETTERS[j] + ". " + o]);
       const bars = el("div", { class: "bars" });
       for (const [value, label] of opts) {
         bars.append(barRow(label, answers.filter((r) => r.answer === value).length, n, key && value === key.correct));
@@ -155,8 +156,8 @@
       card.append(bars);
       const right = namesFor((r) => r.correct);
       const timedOut = namesFor((r) => r.answer === "");
-      if (right) card.append(el("div", { class: "who" }, el("b", {}, "Rätt: "), right));
-      if (timedOut) card.append(el("div", { class: "who" }, el("b", {}, "Hann inte svara: "), timedOut));
+      if (right) card.append(el("div", { class: "who" }, el("b", {}, T.correctNames), right));
+      if (timedOut) card.append(el("div", { class: "who" }, el("b", {}, T.timedOutNames), timedOut));
     }
     if (key && key.explanation) card.append(el("div", { class: "explanation" }, key.explanation));
     return card;
@@ -165,7 +166,7 @@
   function matrix(board, rows) {
     const byPlayer = new Map();
     for (const r of rows) byPlayer.set(r.player_id + "|" + r.question_id, r);
-    const head = el("tr", {}, el("th", {}, "Namn"), questions.map((q, i) => el("th", {}, "F" + (i + 1))), el("th", {}, "Poäng"));
+    const head = el("tr", {}, el("th", {}, T.nameCol), questions.map((q, i) => el("th", {}, T.questionAbbr + (i + 1))), el("th", {}, T.pointsCol));
     const body = board.map((p) =>
       el(
         "tr",
@@ -176,7 +177,7 @@
           if (!r) return el("td", { class: "c-none" }, "·");
           const cls = r.points === 1 || Number(r.points) === 1 ? "c-good" : Number(r.points) > 0 ? "c-partial" : r.answer === "" ? "c-none" : "c-bad";
           const sym = cls === "c-good" ? "✓" : cls === "c-partial" ? "½" : cls === "c-none" ? "–" : "✗";
-          return withTooltip(el("td", { class: cls }, sym), p.name + " · F" + (questions.indexOf(q) + 1) + ": " + answerLabel(q, r.answer));
+          return withTooltip(el("td", { class: cls }, sym), p.name + " · " + T.questionAbbr + (questions.indexOf(q) + 1) + ": " + answerLabel(q, r.answer));
         }),
         el("td", {}, el("b", {}, fmt(p.points)))
       )
@@ -184,8 +185,8 @@
     return el(
       "section",
       { class: "card matrix-wrap" },
-      el("h2", {}, "Alla svar"),
-      el("p", { class: "muted" }, "✓ rätt · ½ nära (skattning) · ✗ fel · – hann inte svara · · inte kommit dit än. Håll muspekaren över en ruta för att se svaret."),
+      el("h2", {}, T.allAnswers),
+      el("p", { class: "muted" }, T.matrixLegend),
       el("table", { class: "matrix" }, el("thead", {}, head), el("tbody", {}, body))
     );
   }
@@ -203,9 +204,9 @@
           "p",
           { class: "muted" },
           "Admin · session ”" + cfg.SESSION + "” · " + info + " · ",
-          el("button", { class: "link-btn", type: "button", disabled: busy, onclick: resetSession }, "Nollställ topplistan"),
+          el("button", { class: "link-btn", type: "button", disabled: busy, onclick: resetSession }, T.resetBoard),
           " · ",
-          el("button", { class: "link-btn", type: "button", onclick: () => (store.logout(), renderLogin()) }, "Logga ut")
+          el("button", { class: "link-btn", type: "button", onclick: () => (store.logout(), renderLogin()) }, T.logOut)
         )
       ),
       el("div", { class: "tiles" }, tiles)
@@ -218,17 +219,14 @@
     try {
       await fn();
     } catch (err) {
-      actionError = err.status === 401 || err.status === 403 ? "Du saknar behörighet, logga in igen." : "Det gick inte, försök igen.";
+      actionError = err.status === 401 || err.status === 403 ? T.noPermission : T.actionFailed;
     }
     busy = false;
     await refresh();
   }
 
   function resetSession() {
-    const ok = confirm(
-      "Nollställa topplistan för session ”" + cfg.SESSION + "”?\n\nAlla svar och alla anslutna tas bort, och quizet går tillbaka till väntrummet. " +
-        "Den som har spelat klart hamnar i väntrummet igen. Den som är mitt i en fråga behöver ladda om sidan."
-    );
+    const ok = confirm(T.resetConfirm(cfg.SESSION));
     if (ok) adminAction(store.resetQuiz);
   }
 
@@ -237,17 +235,17 @@
     const n = lobby.players.length;
     const joinUrl = new URL(".", location.href).href.replace(/^https?:\/\//, "").replace(/\/$/, "");
     root.replaceChildren(
-      statsHeader("väntar på start", tile(n, n === 1 ? "ansluten" : "anslutna")),
+      statsHeader(T.waitingForStart, tile(n, T.joinedTile(n))),
       el(
         "section",
         { class: "card lobby-admin" },
-        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), "Väntar på deltagare"),
-        el("p", { class: "join-url" }, "Gå till ", el("b", {}, joinUrl), " och skriv ditt namn"),
-        el("ul", { class: "chips big" }, n ? lobby.players.map((p) => el("li", {}, p.name)) : el("li", { class: "empty" }, "Ingen har anslutit än…")),
+        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), T.waitingForPlayers),
+        el("p", { class: "join-url" }, T.goTo(el("b", {}, joinUrl))),
+        el("ul", { class: "chips big" }, n ? lobby.players.map((p) => el("li", {}, p.name)) : el("li", { class: "empty" }, T.nobodyYet)),
         el(
           "button",
           { class: "btn-primary btn-start", type: "button", disabled: busy, onclick: () => adminAction(store.startQuiz) },
-          busy ? "Vänta…" : "Starta quizet" + (n ? " för " + n + " deltagare" : "")
+          busy ? T.pleaseWait : T.startQuiz(n)
         ),
         actionError ? el("p", { class: "error" }, actionError) : null
       )
@@ -258,12 +256,12 @@
     const board = leaderboard(rows);
     const finished = board.filter((p) => p.answered === questions.length).length;
     const avg = board.length ? board.reduce((s, p) => s + p.points, 0) / board.length : 0;
-    const startedAt = new Date(lobby.started_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const startedAt = new Date(lobby.started_at).toLocaleTimeString(T.locale, { hour: "2-digit", minute: "2-digit" });
 
-    const header = statsHeader("startade " + startedAt + " · uppdateras var " + REFRESH_MS / 1000 + ":e sekund", [
-      tile(Math.max(board.length, lobby.players.length), "deltagare"),
-      tile(finished, "klara"),
-      tile(fmt(avg), "snittpoäng av " + questions.length),
+    const header = statsHeader(T.startedInfo(startedAt, REFRESH_MS / 1000), [
+      tile(Math.max(board.length, lobby.players.length), T.participants),
+      tile(finished, T.finished),
+      tile(fmt(avg), T.avgOf(questions.length)),
     ]);
     if (actionError) header.append(el("p", { class: "error" }, actionError));
 
@@ -279,9 +277,9 @@
         )
       )
     );
-    if (!board.length) list.append(el("li", {}, el("span"), el("span", { class: "muted" }, "Inga svar än…"), el("span")));
+    if (!board.length) list.append(el("li", {}, el("span"), el("span", { class: "muted" }, T.noAnswers), el("span")));
 
-    const aside = el("aside", { class: "card" }, el("h2", {}, "Topplista"), list);
+    const aside = el("aside", { class: "card" }, el("h2", {}, T.leaderboard), list);
     const stats = el("div", { class: "qstats" }, questions.map((q, i) => questionCard(q, i, rows)));
     root.replaceChildren(header, el("div", { class: "layout" }, aside, stats), matrix(board, rows));
   }
@@ -291,7 +289,7 @@
       if (!keys) {
         const list = await store.fetchKeys();
         if (!list.length) {
-          renderLogin("Kontot har inte admin-behörighet, eller så är facit inte inlagt i databasen.");
+          renderLogin(T.notAdmin);
           store.logout();
           return;
         }
@@ -301,14 +299,14 @@
       if (!lobby.started_at) drawLobby(lobby);
       else draw(await store.fetchAllAnswers(), lobby);
     } catch (err) {
-      if (err.status === 401 || err.status === 403) renderLogin("Du behöver logga in igen.");
+      if (err.status === 401 || err.status === 403) renderLogin(T.loginAgain);
     }
   }
 
   async function start() {
     if (!(await store.accessToken())) return renderLogin();
     keys = null;
-    root.replaceChildren(el("p", { class: "muted" }, "Laddar…"));
+    root.replaceChildren(el("p", { class: "muted" }, T.loading));
     await refresh();
     clearInterval(poll);
     poll = setInterval(refresh, REFRESH_MS);

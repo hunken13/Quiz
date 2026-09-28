@@ -10,6 +10,8 @@ Quiz till föredraget om vägen från konsumentkreditinstitut till bank. Publice
 
 Kör lokalt med `npm run dev` och öppna http://localhost:3000 (quizet) eller http://localhost:3000/admin.html.
 
+Den engelska versionen ligger i `en/` (http://localhost:3000/en/ och /en/admin.html) och har egen session och egna frågor (e1–e8). Alla texter för båda språken finns i `text.js`.
+
 Facit och admin-e-post ligger i `private/answer-key.js`, som inte checkas in.
 Efter en ändring kör du `node tools/build-private-sql.js | clip` och kör resultatet i Supabase SQL Editor.
 
