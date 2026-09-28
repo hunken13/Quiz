@@ -260,3 +260,20 @@ body { background: var(--bg) radial-gradient(ellipse 60% 40% at 100% 0%, var(--b
 .btn-primary:hover:not(:disabled) { filter: brightness(1.15); }
 .progress-bar span { background: var(--brand); }
 .bar-fill.correct { background: var(--good); }
+
+/* Väntrum */
+.waiting { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text-2); }
+.pulse { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--timer); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.lobby-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.chips { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips li { padding: 6px 14px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-weight: 600; }
+.chips li.me { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chips li.empty { background: none; border: 0; color: var(--muted); font-weight: 400; padding-left: 0; }
+.lobby-admin { padding: 32px; }
+.join-url { font-size: 1.4rem; margin-bottom: 24px; }
+.join-url b { color: var(--brand); }
+.chips.big { gap: 10px; min-height: 48px; }
+.chips.big li { font-size: 1.2rem; padding: 8px 18px; }
+.btn-start { max-width: 360px; margin-top: 28px; font-size: 1.15rem; }

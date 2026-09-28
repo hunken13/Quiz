@@ -97,3 +97,68 @@ grant insert on public.answers to anon;
 grant select on public.answers, public.question_keys to authenticated;
 revoke execute on function public.score_answer() from public, anon, authenticated;
 grant execute on function public.leaderboard(text, text) to anon, authenticated;
+
+-- Väntrum: deltagare ansluter med namn, admin startar quizet.
+create table if not exists public.players (
+  session text not null,
+  player_id text not null,
+  player_name text not null check (char_length(player_name) between 1 and 40),
+  joined_at timestamptz not null default now(),
+  primary key (session, player_id)
+);
+create table if not exists public.quiz_state (
+  session text primary key,
+  started_at timestamptz
+);
+alter table public.players enable row level security;
+alter table public.quiz_state enable row level security;
+revoke all on public.players, public.quiz_state from anon, authenticated;
+
+create or replace function public.join_quiz(p_session text, p_player text, p_name text) returns void
+language sql security definer set search_path = public as $$
+  insert into public.players (session, player_id, player_name) values (p_session, p_player, left(trim(p_name), 40))
+  on conflict (session, player_id) do update set player_name = excluded.player_name;
+$$;
+
+-- Namn på anslutna och om quizet har startat. Inga player_id lämnas ut.
+drop function if exists public.lobby(text, text);
+create function public.lobby(p_session text, p_player text default null) returns json
+language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'started_at', (select started_at from public.quiz_state where session = p_session),
+    'players', coalesce((
+      select json_agg(json_build_object('name', player_name, 'me', player_id = p_player) order by joined_at)
+      from public.players where session = p_session
+    ), '[]'::json)
+  );
+$$;
+
+create or replace function public.start_quiz(p_session text) returns timestamptz
+language plpgsql security definer set search_path = public as $$
+declare t timestamptz;
+begin
+  if not public.is_admin() then
+    raise exception 'Bara admin kan starta quizet' using errcode = '42501';
+  end if;
+  insert into public.quiz_state (session, started_at) values (p_session, now())
+  on conflict (session) do update set started_at = coalesce(quiz_state.started_at, now())
+  returning started_at into t;
+  return t;
+end $$;
+
+-- Tar bort alla anslutna och svar i sessionen och går tillbaka till väntrummet (för provkörningar).
+create or replace function public.reset_quiz(p_session text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Bara admin kan nollställa quizet' using errcode = '42501';
+  end if;
+  delete from public.answers where session = p_session;
+  delete from public.players where session = p_session;
+  delete from public.quiz_state where session = p_session;
+end $$;
+
+revoke execute on function public.join_quiz(text, text, text), public.lobby(text, text),
+  public.start_quiz(text), public.reset_quiz(text) from public;
+grant execute on function public.join_quiz(text, text, text), public.lobby(text, text) to anon, authenticated;
+grant execute on function public.start_quiz(text), public.reset_quiz(text) to authenticated;

@@ -15,7 +15,7 @@
     history.replaceState(null, "", location.pathname);
   }
   let state = load();
-  if (!state || !Array.isArray(state.pending)) state = { playerId: newId(), name: "", index: 0, startedAt: null, pending: [] };
+  if (!state || !Array.isArray(state.pending)) state = { playerId: newId(), name: "", joined: false, started: false, index: 0, startedAt: null, pending: [] };
   let timers = [];
 
   function newId() {
@@ -71,13 +71,14 @@
     clearTimers();
     app.replaceChildren();
     if (!state.name) return renderStart();
+    if (!state.started) return renderLobby();
     if (state.index >= questions.length) return renderLeaderboard();
     renderQuestion();
   }
 
   function renderStart() {
     const input = el("input", { type: "text", id: "name", maxlength: "40", autocomplete: "name", placeholder: "Förnamn och efternamnets initial" });
-    const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Starta quizet");
+    const btn = el("button", { class: "btn-primary", type: "submit", disabled: true }, "Gå med");
     input.addEventListener("input", () => (btn.disabled = !input.value.trim()));
     app.append(
       el(
@@ -93,13 +94,55 @@
         },
         el("h1", {}, title),
         el("p", { class: "lead" }, subtitle),
-        el("p", { class: "muted" }, questions.length + " frågor, " + SECONDS + " sekunder per fråga. Resultatet visas i topplistan när du är klar."),
+        el("p", { class: "muted" }, questions.length + " frågor, " + SECONDS + " sekunder per fråga. Quizet startar när alla är med, och resultatet visas i topplistan när du är klar."),
         el("label", { for: "name" }, "Ditt namn (visas i topplistan)"),
         input,
         btn
       )
     );
     input.focus();
+  }
+
+  // Väntrum: visar vilka som anslutit tills admin startar quizet.
+  function renderLobby() {
+    const count = el("span", { class: "muted" });
+    const chips = el("ul", { class: "chips" });
+    const status = el("p", { class: "muted" });
+    app.append(
+      el(
+        "section",
+        { class: "card" },
+        el("h1", {}, "Du är med, " + state.name + "!"),
+        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), "Väntar på att quizet ska starta…"),
+        el("p", { class: "muted" }, "Håll sidan öppen. Första frågan visas automatiskt när quizet startar.")
+      ),
+      el("section", { class: "card", style: "margin-top:16px" }, el("div", { class: "lobby-head" }, el("h2", {}, "Med i quizet"), count), chips, status)
+    );
+
+    const update = async () => {
+      if (state.started) return;
+      try {
+        if (!state.joined) {
+          await store.join(state.playerId, state.name);
+          state.joined = true;
+          save();
+        }
+        const lobby = await store.lobby(state.playerId);
+        if (lobby.started_at) {
+          state.started = true;
+          save();
+          return render();
+        }
+        const n = lobby.players.length;
+        count.textContent = n + (n === 1 ? " ansluten" : " anslutna");
+        chips.replaceChildren(...lobby.players.map((p) => el("li", { class: p.me ? "me" : "" }, p.name)));
+        status.textContent = "";
+      } catch {
+        status.textContent = "Tappade kontakten, försöker igen…";
+      }
+    };
+    update();
+    timers.push(setInterval(update, 2000));
   }
 
   function renderQuestion() {
@@ -217,6 +260,12 @@
         return;
       }
       try {
+        // Admin har nollställt: tillbaka till väntrummet med samma namn.
+        const lobby = await store.lobby(state.playerId);
+        if (!lobby.started_at) {
+          backToLobby();
+          return render();
+        }
         const rows = await store.leaderboard(state.playerId);
         const me = rows.findIndex((r) => r.is_me);
         if (me >= 0) scoreLine.textContent = fmt(rows[me].points);
@@ -240,5 +289,22 @@
     timers.push(setInterval(update, 5000));
   }
 
+  function backToLobby() {
+    state = { playerId: state.playerId, name: state.name, joined: false, started: false, index: 0, startedAt: null, pending: [] };
+    save();
+  }
+
   render();
+  // Om admin har nollställt medan sidan var stängd hamnar man i väntrummet när den öppnas igen.
+  if (state.started) {
+    store
+      .lobby(state.playerId)
+      .then((lobby) => {
+        if (!lobby.started_at && state.started) {
+          backToLobby();
+          render();
+        }
+      })
+      .catch(() => {});
+  }
 })();

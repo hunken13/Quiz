@@ -41,6 +41,17 @@
     });
   }
 
+  function rpc(name, body, token) {
+    return request("/rest/v1/rpc/" + name, { method: "POST", body: JSON.stringify({ p_session: cfg.SESSION, ...body }) }, token);
+  }
+  function join(playerId, name) {
+    return rpc("join_quiz", { p_player: playerId, p_name: name });
+  }
+  // { started_at, players: [{ name, me }] }
+  function lobby(playerId) {
+    return rpc("lobby", { p_player: playerId || null });
+  }
+
   // --- Admin (inloggning via Supabase Auth) ---
   function readAuth() {
     try {
@@ -89,6 +100,17 @@
     }
     return request(path, {}, t);
   }
+  async function adminRpc(name) {
+    const t = await accessToken();
+    if (!t) {
+      const err = new Error("Inte inloggad");
+      err.status = 401;
+      throw err;
+    }
+    return rpc(name, {}, t);
+  }
+  const startQuiz = () => adminRpc("start_quiz");
+  const resetQuiz = () => adminRpc("reset_quiz");
   function fetchAllAnswers() {
     return adminGet(
       "/rest/v1/answers?select=player_id,player_name,question_id,answer,correct,points,created_at" +
@@ -99,5 +121,5 @@
     return adminGet("/rest/v1/question_keys?select=id,type,correct,tolerance,explanation");
   }
 
-  window.QuizStore = { saveAnswer, leaderboard, login, logout, accessToken, fetchAllAnswers, fetchKeys };
+  window.QuizStore = { saveAnswer, leaderboard, join, lobby, login, logout, accessToken, fetchAllAnswers, fetchKeys, startQuiz, resetQuiz };
 })();

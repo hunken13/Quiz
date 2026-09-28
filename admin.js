@@ -8,6 +8,8 @@
   const REFRESH_MS = 3000;
   let poll = null;
   let keys = null;
+  let busy = false;
+  let actionError = "";
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -189,12 +191,8 @@
   }
 
   // ---------- Vy ----------
-  function draw(rows) {
-    const board = leaderboard(rows);
-    const finished = board.filter((p) => p.answered === questions.length).length;
-    const avg = board.length ? board.reduce((s, p) => s + p.points, 0) / board.length : 0;
-
-    const header = el(
+  function statsHeader(info, tiles) {
+    return el(
       "div",
       { class: "stats-header" },
       el(
@@ -204,12 +202,70 @@
         el(
           "p",
           { class: "muted" },
-          "Admin · session ”" + cfg.SESSION + "” · uppdateras var " + REFRESH_MS / 1000 + ":e sekund · ",
+          "Admin · session ”" + cfg.SESSION + "” · " + info + " · ",
+          el("button", { class: "link-btn", type: "button", disabled: busy, onclick: resetSession }, "Nollställ topplistan"),
+          " · ",
           el("button", { class: "link-btn", type: "button", onclick: () => (store.logout(), renderLogin()) }, "Logga ut")
         )
       ),
-      el("div", { class: "tiles" }, tile(board.length, "deltagare"), tile(finished, "klara"), tile(fmt(avg), "snittpoäng av " + questions.length))
+      el("div", { class: "tiles" }, tiles)
     );
+  }
+
+  async function adminAction(fn) {
+    busy = true;
+    actionError = "";
+    try {
+      await fn();
+    } catch (err) {
+      actionError = err.status === 401 || err.status === 403 ? "Du saknar behörighet, logga in igen." : "Det gick inte, försök igen.";
+    }
+    busy = false;
+    await refresh();
+  }
+
+  function resetSession() {
+    const ok = confirm(
+      "Nollställa topplistan för session ”" + cfg.SESSION + "”?\n\nAlla svar och alla anslutna tas bort, och quizet går tillbaka till väntrummet. " +
+        "Den som har spelat klart hamnar i väntrummet igen. Den som är mitt i en fråga behöver ladda om sidan."
+    );
+    if (ok) adminAction(store.resetQuiz);
+  }
+
+  // Väntrum innan start: vilka som anslutit och startknappen. Visar inget facit, så det går att visa på storskärm.
+  function drawLobby(lobby) {
+    const n = lobby.players.length;
+    const joinUrl = new URL(".", location.href).href.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    root.replaceChildren(
+      statsHeader("väntar på start", tile(n, n === 1 ? "ansluten" : "anslutna")),
+      el(
+        "section",
+        { class: "card lobby-admin" },
+        el("p", { class: "waiting" }, el("span", { class: "pulse", "aria-hidden": "true" }), "Väntar på deltagare"),
+        el("p", { class: "join-url" }, "Gå till ", el("b", {}, joinUrl), " och skriv ditt namn"),
+        el("ul", { class: "chips big" }, n ? lobby.players.map((p) => el("li", {}, p.name)) : el("li", { class: "empty" }, "Ingen har anslutit än…")),
+        el(
+          "button",
+          { class: "btn-primary btn-start", type: "button", disabled: busy, onclick: () => adminAction(store.startQuiz) },
+          busy ? "Vänta…" : "Starta quizet" + (n ? " för " + n + " deltagare" : "")
+        ),
+        actionError ? el("p", { class: "error" }, actionError) : null
+      )
+    );
+  }
+
+  function draw(rows, lobby) {
+    const board = leaderboard(rows);
+    const finished = board.filter((p) => p.answered === questions.length).length;
+    const avg = board.length ? board.reduce((s, p) => s + p.points, 0) / board.length : 0;
+    const startedAt = new Date(lobby.started_at).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+
+    const header = statsHeader("startade " + startedAt + " · uppdateras var " + REFRESH_MS / 1000 + ":e sekund", [
+      tile(Math.max(board.length, lobby.players.length), "deltagare"),
+      tile(finished, "klara"),
+      tile(fmt(avg), "snittpoäng av " + questions.length),
+    ]);
+    if (actionError) header.append(el("p", { class: "error" }, actionError));
 
     const list = el("ol", { class: "board" });
     board.forEach((p, i) =>
@@ -241,7 +297,9 @@
         }
         keys = Object.fromEntries(list.map((k) => [k.id, k]));
       }
-      draw(await store.fetchAllAnswers());
+      const lobby = await store.lobby();
+      if (!lobby.started_at) drawLobby(lobby);
+      else draw(await store.fetchAllAnswers(), lobby);
     } catch (err) {
       if (err.status === 401 || err.status === 403) renderLogin("Du behöver logga in igen.");
     }
